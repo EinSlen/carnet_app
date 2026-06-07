@@ -1,26 +1,38 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/app_repository.dart';
 import '../data/models.dart';
+import '../data/providers.dart';
 import '../theme/app_theme.dart';
 
 /// Le log en 1 tap : l'action quotidienne, instantanée (promesse coeur).
-class QuickLogScreen extends StatefulWidget {
+class QuickLogScreen extends ConsumerStatefulWidget {
   final Animal animal;
   const QuickLogScreen({super.key, required this.animal});
 
   @override
-  State<QuickLogScreen> createState() => _QuickLogScreenState();
+  ConsumerState<QuickLogScreen> createState() => _QuickLogScreenState();
 }
 
-class _QuickLogScreenState extends State<QuickLogScreen> {
-  final _repo = AppRepository.instance;
-  bool _changed = false;
-
+class _QuickLogScreenState extends ConsumerState<QuickLogScreen> {
   int get _aid => widget.animal.id!;
 
+  Future<void> _run(Future<void> Function() op, String okMessage) async {
+    try {
+      await op();
+      if (mounted) _toast(okMessage);
+    } catch (_) {
+      if (mounted) _toast('Enregistrement impossible.');
+    }
+  }
+
+  void _toast(String msg) => ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 1)));
+
   Future<void> _doseGiven() async {
-    final treatments = await _repo.getTreatments(_aid, onlyActive: true);
+    final repo = ref.read(repositoryProvider);
+    final treatments = await repo.getTreatments(_aid, onlyActive: true);
+    if (!mounted) return;
     Treatment? chosen;
     if (treatments.isNotEmpty) {
       chosen = await showModalBottomSheet<Treatment>(
@@ -46,18 +58,20 @@ class _QuickLogScreenState extends State<QuickLogScreen> {
       );
       if (chosen == null) return;
     }
-    await _repo.insertLogEvent(LogEvent(
-      animalId: _aid,
-      treatmentId: chosen?.id,
-      type: 'dose',
-      status: 'donné',
-      description: chosen?.name ?? '',
-    ));
-    _done('Dose enregistrée ✓');
+    await _run(
+      () => repo.insertLogEvent(LogEvent(
+        animalId: _aid,
+        treatmentId: chosen?.id,
+        type: LogType.dose,
+        status: 'donné',
+        description: chosen?.name ?? '',
+      )),
+      'Dose enregistrée ✓',
+    );
   }
 
   Future<void> _addMeasure() async {
-    String type = 'poids';
+    var type = MeasureType.poids;
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -67,14 +81,14 @@ class _QuickLogScreenState extends State<QuickLogScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              DropdownButtonFormField<String>(
+              DropdownButtonFormField<MeasureType>(
                 initialValue: type,
-                items: const [
-                  DropdownMenuItem(value: 'poids', child: Text('Poids (kg)')),
-                  DropdownMenuItem(
-                      value: 'glycemie', child: Text('Glycémie (g/L)')),
+                items: [
+                  for (final t in MeasureType.values)
+                    DropdownMenuItem(
+                        value: t, child: Text('${t.label} (${t.unit})')),
                 ],
-                onChanged: (v) => setLocal(() => type = v ?? 'poids'),
+                onChanged: (v) => setLocal(() => type = v ?? MeasureType.poids),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -99,16 +113,15 @@ class _QuickLogScreenState extends State<QuickLogScreen> {
     if (ok != true) return;
     final value = double.tryParse(ctrl.text.replaceAll(',', '.'));
     if (value == null) return;
-    await _repo.insertMeasure(Measure(
-      animalId: _aid,
-      type: type,
-      value: value,
-      unit: type == 'poids' ? 'kg' : 'g/L',
-    ));
-    _done('Mesure enregistrée ✓');
+    await _run(
+      () => ref
+          .read(repositoryProvider)
+          .insertMeasure(Measure(animalId: _aid, type: type, value: value)),
+      'Mesure enregistrée ✓',
+    );
   }
 
-  Future<void> _addText(String type, String title) async {
+  Future<void> _addText(LogType type, String title) async {
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -131,55 +144,38 @@ class _QuickLogScreenState extends State<QuickLogScreen> {
       ),
     );
     if (ok != true) return;
-    await _repo.insertLogEvent(LogEvent(
-      animalId: _aid,
-      type: type,
-      description: ctrl.text.trim(),
-    ));
-    _done('Noté ✓');
-  }
-
-  void _done(String msg) {
-    _changed = true;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), duration: const Duration(seconds: 1)));
+    await _run(
+      () => ref.read(repositoryProvider).insertLogEvent(
+          LogEvent(animalId: _aid, type: type, description: ctrl.text.trim())),
+      'Noté ✓',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, result) {},
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text('Noter · ${widget.animal.name}'),
-          leading: IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => Navigator.pop(context, _changed),
-          ),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _ActionBtn(
-                emoji: '💊',
-                label: 'Médicament donné',
-                primary: true,
-                onTap: _doseGiven),
-            _ActionBtn(
-                emoji: '🩸',
-                label: 'Mesure (poids / glycémie)',
-                onTap: _addMeasure),
-            _ActionBtn(
-                emoji: '⚠️',
-                label: 'Symptôme',
-                onTap: () => _addText('symptome', 'Noter un symptôme')),
-            _ActionBtn(
-                emoji: '📝',
-                label: 'Note libre',
-                onTap: () => _addText('note', 'Note libre')),
-          ],
-        ),
+    return Scaffold(
+      appBar: AppBar(title: Text('Noter · ${widget.animal.name}')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _ActionBtn(
+              emoji: '💊',
+              label: 'Médicament donné',
+              primary: true,
+              onTap: _doseGiven),
+          _ActionBtn(
+              emoji: '🩸',
+              label: 'Mesure (poids / glycémie)',
+              onTap: _addMeasure),
+          _ActionBtn(
+              emoji: '⚠️',
+              label: 'Symptôme',
+              onTap: () => _addText(LogType.symptome, 'Noter un symptôme')),
+          _ActionBtn(
+              emoji: '📝',
+              label: 'Note libre',
+              onTap: () => _addText(LogType.note, 'Note libre')),
+        ],
       ),
     );
   }

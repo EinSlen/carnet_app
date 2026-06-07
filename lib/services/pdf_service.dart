@@ -17,6 +17,13 @@ class PdfService {
     final dfh = DateFormat('dd/MM HH:mm');
     final doc = pw.Document();
 
+    pw.Widget sectionTitle(String t) => pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 12, bottom: 2),
+          child: pw.Text(t,
+              style:
+                  pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+        );
+
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -27,7 +34,7 @@ class PdfService {
                 style:
                     pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
           ),
-          pw.Text('${animal.species} · ${animal.breed} · '
+          pw.Text('${animal.species.label} · ${animal.breed} · '
               '${animal.ageYears != null ? '${animal.ageYears} ans' : ''}'
               '${animal.weight != null ? ' · ${animal.weight} kg' : ''}'),
           if (animal.chronicConditions.isNotEmpty)
@@ -35,17 +42,11 @@ class PdfService {
           pw.SizedBox(height: 4),
           pw.Text('Édité le ${df.format(DateTime.now())}',
               style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 9)),
-          pw.SizedBox(height: 14),
-          pw.Text('Traitements en cours',
-              style:
-                  pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+          sectionTitle('Traitements en cours'),
           if (treatments.isEmpty) pw.Text('—'),
           ...treatments.map((t) => pw.Bullet(
               text: '${t.name} · ${t.dosage} · ${t.times.join(" / ")}')),
-          pw.SizedBox(height: 12),
-          pw.Text('Mesures',
-              style:
-                  pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+          sectionTitle('Mesures'),
           if (measures.isEmpty) pw.Text('—'),
           if (measures.isNotEmpty)
             pw.TableHelper.fromTextArray(
@@ -53,17 +54,17 @@ class PdfService {
               cellStyle: const pw.TextStyle(fontSize: 9),
               data: measures.reversed
                   .take(40)
-                  .map((m) =>
-                      [dfh.format(m.dateTime), m.type, '${m.value} ${m.unit}'])
+                  .map((m) => [
+                        dfh.format(m.dateTime),
+                        m.type.label,
+                        '${m.value} ${m.unit}'
+                      ])
                   .toList(),
             ),
-          pw.SizedBox(height: 12),
-          pw.Text('Journal récent',
-              style:
-                  pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+          sectionTitle('Journal récent'),
           if (events.isEmpty) pw.Text('—'),
           ...events.take(40).map((e) => pw.Bullet(
-              text: '${dfh.format(e.dateTime)} · ${e.type}'
+              text: '${dfh.format(e.dateTime)} · ${e.type.label}'
                   '${e.status != null ? " (${e.status})" : ""}'
                   '${e.description.isNotEmpty ? " — ${e.description}" : ""}')),
         ],

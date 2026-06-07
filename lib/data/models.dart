@@ -1,16 +1,78 @@
-// Modèles de données du MVP (voir Spec-app-animaux.pdf §7).
+// Modèles de données du MVP (voir docs/Spec-app-animaux.pdf §7).
 // Stockés en local via sqflite. Les dates sont des millisecondsSinceEpoch.
+// Les types catégoriels sont des enums (sécurité au compile, fini les "magic strings").
 
 int? _dt(DateTime? d) => d?.millisecondsSinceEpoch;
 DateTime? _fromDt(Object? v) =>
     v == null ? null : DateTime.fromMillisecondsSinceEpoch(v as int);
 
+/// Espèce de l'animal. La valeur stockée en base est `name` (ex: "chat").
+enum Species {
+  chien('🐶', 'Chien'),
+  chat('🐱', 'Chat'),
+  lapin('🐰', 'Lapin'),
+  rongeur('🐹', 'Rongeur'),
+  oiseau('🐦', 'Oiseau'),
+  reptile('🦎', 'Reptile'),
+  cheval('🐴', 'Cheval'),
+  autre('🐾', 'Autre');
+
+  const Species(this.emoji, this.label);
+  final String emoji;
+  final String label;
+
+  static Species fromName(String? name) => Species.values
+      .firstWhere((s) => s.name == name, orElse: () => Species.chat);
+}
+
+/// Forme galénique d'un traitement.
+enum TreatmentForm {
+  comprime('Comprimé'),
+  liquide('Liquide'),
+  injection('Injection'),
+  pommade('Pommade');
+
+  const TreatmentForm(this.label);
+  final String label;
+
+  static TreatmentForm fromName(String? name) => TreatmentForm.values
+      .firstWhere((f) => f.name == name, orElse: () => TreatmentForm.comprime);
+}
+
+/// Type d'entrée du journal.
+enum LogType {
+  dose('💊', 'Médicament donné'),
+  symptome('⚠️', 'Symptôme'),
+  repas('🍽️', 'Repas'),
+  note('📝', 'Note');
+
+  const LogType(this.emoji, this.label);
+  final String emoji;
+  final String label;
+
+  static LogType fromName(String? name) => LogType.values
+      .firstWhere((t) => t.name == name, orElse: () => LogType.note);
+}
+
+/// Type de mesure suivie.
+enum MeasureType {
+  poids('Poids', 'kg'),
+  glycemie('Glycémie', 'g/L');
+
+  const MeasureType(this.label, this.unit);
+  final String label;
+  final String unit;
+
+  static MeasureType fromName(String? name) => MeasureType.values
+      .firstWhere((t) => t.name == name, orElse: () => MeasureType.poids);
+}
+
 class Animal {
   final int? id;
   final String name;
-  final String species; // 'chien' | 'chat'
+  final Species species;
   final String breed;
-  final String sex; // 'M' | 'F' | 'M stérilisé' | 'F stérilisée'
+  final String sex;
   final DateTime? birthDate;
   final double? weight;
   final String microchip;
@@ -23,7 +85,7 @@ class Animal {
   Animal({
     this.id,
     required this.name,
-    this.species = 'chat',
+    this.species = Species.chat,
     this.breed = '',
     this.sex = '',
     this.birthDate,
@@ -36,25 +98,16 @@ class Animal {
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
-  String get emoji => switch (species) {
-        'chien' => '🐶',
-        'chat' => '🐱',
-        'lapin' => '🐰',
-        'rongeur' => '🐹',
-        'oiseau' => '🐦',
-        'reptile' => '🦎',
-        'cheval' => '🐴',
-        _ => '🐾',
-      };
+  String get emoji => species.emoji;
 
   int? get ageYears => birthDate == null
       ? null
-      : ((DateTime.now().difference(birthDate!).inDays) / 365).floor();
+      : (DateTime.now().difference(birthDate!).inDays / 365).floor();
 
   Map<String, Object?> toMap() => {
         'id': id,
         'name': name,
-        'species': species,
+        'species': species.name,
         'breed': breed,
         'sex': sex,
         'birth_date': _dt(birthDate),
@@ -70,7 +123,7 @@ class Animal {
   factory Animal.fromMap(Map<String, Object?> m) => Animal(
         id: m['id'] as int?,
         name: m['name'] as String? ?? '',
-        species: m['species'] as String? ?? 'chat',
+        species: Species.fromName(m['species'] as String?),
         breed: m['breed'] as String? ?? '',
         sex: m['sex'] as String? ?? '',
         birthDate: _fromDt(m['birth_date']),
@@ -82,22 +135,6 @@ class Animal {
         photoPath: m['photo_path'] as String?,
         createdAt: _fromDt(m['created_at']) ?? DateTime.now(),
       );
-
-  Animal copyWith({int? id}) => Animal(
-        id: id ?? this.id,
-        name: name,
-        species: species,
-        breed: breed,
-        sex: sex,
-        birthDate: birthDate,
-        weight: weight,
-        microchip: microchip,
-        chronicConditions: chronicConditions,
-        allergies: allergies,
-        notes: notes,
-        photoPath: photoPath,
-        createdAt: createdAt,
-      );
 }
 
 class Treatment {
@@ -105,7 +142,7 @@ class Treatment {
   final int animalId;
   final String name;
   final String dosage;
-  final String form; // comprimé | liquide | injection | pommade
+  final TreatmentForm form;
   final List<String> times; // ['08:00','20:00']
   final DateTime startDate;
   final DateTime? endDate;
@@ -119,7 +156,7 @@ class Treatment {
     required this.animalId,
     required this.name,
     this.dosage = '',
-    this.form = 'comprimé',
+    this.form = TreatmentForm.comprime,
     this.times = const [],
     DateTime? startDate,
     this.endDate,
@@ -135,7 +172,7 @@ class Treatment {
         'animal_id': animalId,
         'name': name,
         'dosage': dosage,
-        'form': form,
+        'form': form.name,
         'times': times.join(','),
         'start_date': startDate.millisecondsSinceEpoch,
         'end_date': _dt(endDate),
@@ -150,7 +187,7 @@ class Treatment {
         animalId: m['animal_id'] as int,
         name: m['name'] as String? ?? '',
         dosage: m['dosage'] as String? ?? '',
-        form: m['form'] as String? ?? 'comprimé',
+        form: TreatmentForm.fromName(m['form'] as String?),
         times: ((m['times'] as String?) ?? '')
             .split(',')
             .where((s) => s.trim().isNotEmpty)
@@ -168,8 +205,8 @@ class LogEvent {
   final int? id;
   final int animalId;
   final int? treatmentId;
-  final String type; // dose | symptome | repas | note
-  final String? status; // pour dose : 'donné'
+  final LogType type;
+  final String? status; // pour une dose : 'donné'
   final DateTime dateTime;
   final String description;
   final int? severity; // symptôme 1-5
@@ -185,11 +222,14 @@ class LogEvent {
     this.severity,
   }) : dateTime = dateTime ?? DateTime.now();
 
+  String get label =>
+      description.isEmpty ? type.label : '${type.label} · $description';
+
   Map<String, Object?> toMap() => {
         'id': id,
         'animal_id': animalId,
         'treatment_id': treatmentId,
-        'type': type,
+        'type': type.name,
         'status': status,
         'date_time': dateTime.millisecondsSinceEpoch,
         'description': description,
@@ -200,7 +240,7 @@ class LogEvent {
         id: m['id'] as int?,
         animalId: m['animal_id'] as int,
         treatmentId: m['treatment_id'] as int?,
-        type: m['type'] as String? ?? 'note',
+        type: LogType.fromName(m['type'] as String?),
         status: m['status'] as String?,
         dateTime: _fromDt(m['date_time']) ?? DateTime.now(),
         description: m['description'] as String? ?? '',
@@ -211,9 +251,8 @@ class LogEvent {
 class Measure {
   final int? id;
   final int animalId;
-  final String type; // poids | glycemie
+  final MeasureType type;
   final double value;
-  final String unit; // kg | g/L
   final DateTime dateTime;
   final String note;
 
@@ -222,17 +261,18 @@ class Measure {
     required this.animalId,
     required this.type,
     required this.value,
-    this.unit = '',
     DateTime? dateTime,
     this.note = '',
   }) : dateTime = dateTime ?? DateTime.now();
 
+  String get unit => type.unit;
+
   Map<String, Object?> toMap() => {
         'id': id,
         'animal_id': animalId,
-        'type': type,
+        'type': type.name,
         'value': value,
-        'unit': unit,
+        'unit': type.unit,
         'date_time': dateTime.millisecondsSinceEpoch,
         'note': note,
       };
@@ -240,9 +280,8 @@ class Measure {
   factory Measure.fromMap(Map<String, Object?> m) => Measure(
         id: m['id'] as int?,
         animalId: m['animal_id'] as int,
-        type: m['type'] as String? ?? 'poids',
+        type: MeasureType.fromName(m['type'] as String?),
         value: (m['value'] as num?)?.toDouble() ?? 0,
-        unit: m['unit'] as String? ?? '',
         dateTime: _fromDt(m['date_time']) ?? DateTime.now(),
         note: m['note'] as String? ?? '',
       );

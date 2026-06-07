@@ -1,99 +1,73 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../data/app_repository.dart';
 import '../data/models.dart';
+import '../data/providers.dart';
 import '../services/pdf_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/error_view.dart';
 
-class HistoryScreen extends StatefulWidget {
+class HistoryScreen extends ConsumerWidget {
   final Animal animal;
   const HistoryScreen({super.key, required this.animal});
 
-  @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
-}
-
-class _HistoryScreenState extends State<HistoryScreen> {
-  final _repo = AppRepository.instance;
-  List<Measure> _weights = [];
-  List<Measure> _glucose = [];
-  List<LogEvent> _events = [];
-  bool _loading = true;
-
-  int get _aid => widget.animal.id!;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final w = await _repo.getMeasures(_aid, type: 'poids');
-    final g = await _repo.getMeasures(_aid, type: 'glycemie');
-    final e = await _repo.getLogEvents(_aid);
-    setState(() {
-      _weights = w;
-      _glucose = g;
-      _events = e;
-      _loading = false;
-    });
-  }
-
-  Future<void> _exportPdf() async {
-    final treatments = await _repo.getTreatments(_aid);
-    final measures = await _repo.getMeasures(_aid);
+  Future<void> _exportPdf(WidgetRef ref) async {
+    final repo = ref.read(repositoryProvider);
+    final id = animal.id!;
     await PdfService.shareVetReport(
-      animal: widget.animal,
-      treatments: treatments,
-      events: _events,
-      measures: measures,
+      animal: animal,
+      treatments: await repo.getTreatments(id),
+      events: await repo.getLogEvents(id),
+      measures: await repo.getMeasures(id),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(animalHistoryProvider(animal.id!));
     return Scaffold(
       appBar: AppBar(
-        title: Text('Suivi · ${widget.animal.name}'),
+        title: Text('Suivi · ${animal.name}'),
         actions: [
           IconButton(
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-              onPressed: _exportPdf),
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            onPressed: () => _exportPdf(ref),
+          ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(14),
-              children: [
-                _ChartCard(
-                    title: 'Poids (kg)',
-                    data: _weights,
-                    color: AppColors.coral),
-                _ChartCard(
-                    title: 'Glycémie (g/L)',
-                    data: _glucose,
-                    color: AppColors.teal),
-                const SizedBox(height: 8),
-                Text('Journal', style: Theme.of(context).textTheme.titleMedium),
-                if (_events.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('Aucune entrée.',
-                        style: TextStyle(color: AppColors.muted)),
-                  ),
-                ..._events.map((e) => ListTile(
-                      dense: true,
-                      leading: Text(_emoji(e.type)),
-                      title: Text(_label(e)),
-                      subtitle: Text(
-                          DateFormat('dd/MM/yyyy HH:mm').format(e.dateTime)),
-                    )),
-              ],
-            ),
+      body: history.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ErrorView(
+            onRetry: () => ref.invalidate(animalHistoryProvider(animal.id!))),
+        data: (h) => ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
+            _ChartCard(
+                title: 'Poids (kg)', data: h.weights, color: AppColors.coral),
+            _ChartCard(
+                title: 'Glycémie (g/L)',
+                data: h.glucose,
+                color: AppColors.teal),
+            const SizedBox(height: 8),
+            Text('Journal', style: Theme.of(context).textTheme.titleMedium),
+            if (h.events.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text('Aucune entrée.',
+                    style: TextStyle(color: AppColors.muted)),
+              ),
+            ...h.events.map((e) => ListTile(
+                  dense: true,
+                  leading: Text(e.type.emoji),
+                  title: Text(e.label),
+                  subtitle:
+                      Text(DateFormat('dd/MM/yyyy HH:mm').format(e.dateTime)),
+                )),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -159,21 +133,4 @@ class _ChartCard extends StatelessWidget {
       ),
     );
   }
-}
-
-String _emoji(String type) => switch (type) {
-      'dose' => '💊',
-      'symptome' => '⚠️',
-      'repas' => '🍽️',
-      _ => '📝',
-    };
-
-String _label(LogEvent e) {
-  final base = switch (e.type) {
-    'dose' => 'Médicament donné',
-    'symptome' => 'Symptôme',
-    'repas' => 'Repas',
-    _ => 'Note',
-  };
-  return e.description.isEmpty ? base : '$base · ${e.description}';
 }

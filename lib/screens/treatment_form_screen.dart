@@ -1,26 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/app_repository.dart';
 import '../data/models.dart';
-import '../services/notification_service.dart';
+import '../data/providers.dart';
 import '../theme/app_theme.dart';
 
-class TreatmentFormScreen extends StatefulWidget {
+class TreatmentFormScreen extends ConsumerStatefulWidget {
   final int animalId;
   const TreatmentFormScreen({super.key, required this.animalId});
 
   @override
-  State<TreatmentFormScreen> createState() => _TreatmentFormScreenState();
+  ConsumerState<TreatmentFormScreen> createState() =>
+      _TreatmentFormScreenState();
 }
 
-class _TreatmentFormScreenState extends State<TreatmentFormScreen> {
+class _TreatmentFormScreenState extends ConsumerState<TreatmentFormScreen> {
   final _form = GlobalKey<FormState>();
-  final _repo = AppRepository.instance;
-
   final _name = TextEditingController();
   final _dosage = TextEditingController();
-  String _formType = 'comprimé';
+  TreatmentForm _formType = TreatmentForm.comprime;
   final List<TimeOfDay> _times = [const TimeOfDay(hour: 8, minute: 0)];
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _dosage.dispose();
+    super.dispose();
+  }
 
   String _fmt(TimeOfDay t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
@@ -32,27 +39,37 @@ class _TreatmentFormScreenState extends State<TreatmentFormScreen> {
   }
 
   Future<void> _save() async {
-    if (!_form.currentState!.validate()) return;
-    final treatment = Treatment(
-      animalId: widget.animalId,
-      name: _name.text.trim(),
-      dosage: _dosage.text.trim(),
-      form: _formType,
-      times: _times.map(_fmt).toList(),
-    );
-    final id = await _repo.insertTreatment(treatment);
-    // Planifie les rappels fiables pour chaque créneau.
-    final saved = Treatment(
-      id: id,
-      animalId: treatment.animalId,
-      name: treatment.name,
-      dosage: treatment.dosage,
-      form: treatment.form,
-      times: treatment.times,
-      startDate: treatment.startDate,
-    );
-    await NotificationService.instance.scheduleForTreatment(saved);
-    if (mounted) Navigator.pop(context, true);
+    if (!_form.currentState!.validate() || _saving) return;
+    setState(() => _saving = true);
+    try {
+      final repo = ref.read(repositoryProvider);
+      final times = _times.map(_fmt).toList();
+      final id = await repo.insertTreatment(Treatment(
+        animalId: widget.animalId,
+        name: _name.text.trim(),
+        dosage: _dosage.text.trim(),
+        form: _formType,
+        times: times,
+      ));
+      // Planifie les rappels fiables pour chaque créneau.
+      await ref
+          .read(notificationServiceProvider)
+          .scheduleForTreatment(Treatment(
+            id: id,
+            animalId: widget.animalId,
+            name: _name.text.trim(),
+            dosage: _dosage.text.trim(),
+            form: _formType,
+            times: times,
+          ));
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Enregistrement impossible.')));
+      }
+    }
   }
 
   @override
@@ -79,16 +96,15 @@ class _TreatmentFormScreenState extends State<TreatmentFormScreen> {
                   labelText: 'Dose', hintText: '2 UI, 1 comprimé...'),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
+            DropdownButtonFormField<TreatmentForm>(
               initialValue: _formType,
               decoration: const InputDecoration(labelText: 'Forme'),
-              items: const [
-                DropdownMenuItem(value: 'comprimé', child: Text('Comprimé')),
-                DropdownMenuItem(value: 'liquide', child: Text('Liquide')),
-                DropdownMenuItem(value: 'injection', child: Text('Injection')),
-                DropdownMenuItem(value: 'pommade', child: Text('Pommade')),
+              items: [
+                for (final f in TreatmentForm.values)
+                  DropdownMenuItem(value: f, child: Text(f.label)),
               ],
-              onChanged: (v) => setState(() => _formType = v ?? 'comprimé'),
+              onChanged: (v) =>
+                  setState(() => _formType = v ?? TreatmentForm.comprime),
             ),
             const SizedBox(height: 20),
             Text('Heures de prise (rappels)',
@@ -126,7 +142,10 @@ class _TreatmentFormScreenState extends State<TreatmentFormScreen> {
                   style: const TextStyle(color: Color(0xFF1F7A45))),
             ),
             const SizedBox(height: 24),
-            FilledButton(onPressed: _save, child: const Text('Enregistrer')),
+            FilledButton(
+              onPressed: _saving ? null : _save,
+              child: Text(_saving ? 'Enregistrement...' : 'Enregistrer'),
+            ),
           ],
         ),
       ),

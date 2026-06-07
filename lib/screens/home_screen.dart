@@ -1,73 +1,65 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/app_repository.dart';
 import '../data/models.dart';
-import '../services/notification_service.dart';
+import '../data/providers.dart';
 import '../theme/app_theme.dart';
+import '../widgets/error_view.dart';
 import 'animal_detail_screen.dart';
 import 'animal_form_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  final _repo = AppRepository.instance;
-  late Future<List<Animal>> _future;
-
+class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _reload();
     // Demande les permissions de notification au démarrage.
-    WidgetsBinding.instance.addPostFrameCallback(
-        (_) => NotificationService.instance.requestPermissions());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(notificationServiceProvider).requestPermissions();
+    });
   }
 
-  void _reload() => setState(() => _future = _repo.getAnimals());
-
   Future<void> _addAnimal() async {
-    final ok = await Navigator.push<bool>(
+    await Navigator.push(
         context, MaterialPageRoute(builder: (_) => const AnimalFormScreen()));
-    if (ok == true) _reload();
+    if (mounted) ref.invalidate(animalsProvider);
   }
 
   Future<void> _openAnimal(Animal a) async {
     await Navigator.push(context,
         MaterialPageRoute(builder: (_) => AnimalDetailScreen(animalId: a.id!)));
-    _reload();
+    if (mounted) ref.invalidate(animalsProvider);
   }
 
   @override
   Widget build(BuildContext context) {
+    final animals = ref.watch(animalsProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Mes animaux')),
       floatingActionButton: FloatingActionButton(
         onPressed: _addAnimal,
         child: const Icon(Icons.add),
       ),
-      body: FutureBuilder<List<Animal>>(
-        future: _future,
-        builder: (context, snap) {
-          if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final animals = snap.data!;
-          if (animals.isEmpty) {
-            return _EmptyState(onAdd: _addAnimal);
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(14),
-            itemCount: animals.length,
-            itemBuilder: (context, i) => _AnimalCard(
-              animal: animals[i],
-              onTap: () => _openAnimal(animals[i]),
-            ),
-          );
-        },
+      body: animals.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) =>
+            ErrorView(onRetry: () => ref.invalidate(animalsProvider)),
+        data: (list) => list.isEmpty
+            ? _EmptyState(onAdd: _addAnimal)
+            : ListView.builder(
+                padding: const EdgeInsets.all(14),
+                itemCount: list.length,
+                itemBuilder: (context, i) => _AnimalCard(
+                  animal: list[i],
+                  onTap: () => _openAnimal(list[i]),
+                ),
+              ),
       ),
     );
   }
@@ -81,7 +73,7 @@ class _AnimalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sub = [
-      animal.species,
+      animal.species.label,
       if (animal.ageYears != null) '${animal.ageYears} ans',
       if (animal.weight != null) '${animal.weight} kg',
     ].join(' · ');

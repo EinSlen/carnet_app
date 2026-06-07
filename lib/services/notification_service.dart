@@ -7,25 +7,24 @@ import '../data/models.dart';
 
 /// LE coeur du produit : des rappels FIABLES (le point faible de tous les
 /// concurrents). Notifications locales planifiées (pas de serveur) + timezone.
-/// Voir Spec-app-animaux.pdf §10.
+/// Voir docs/Spec-app-animaux.pdf §10. Injecté via Riverpod (providers.dart).
 class NotificationService {
-  NotificationService._();
-  static final NotificationService instance = NotificationService._();
+  NotificationService();
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
   Future<void> init() async {
-    // 1) Timezone (cause n°1 des bugs : toujours planifier en TZDateTime)
+    // 1) Timezone (cause n°1 des bugs : toujours planifier en TZDateTime).
     tzdata.initializeTimeZones();
     try {
-      final String name = await FlutterTimezone.getLocalTimezone();
+      final name = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(name));
     } catch (_) {
       tz.setLocalLocation(tz.getLocation('Europe/Paris'));
     }
 
-    // 2) Init du plugin
+    // 2) Init du plugin.
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const ios = DarwinInitializationSettings();
     await _plugin.initialize(
@@ -33,7 +32,7 @@ class NotificationService {
     );
   }
 
-  /// À appeler une fois (ex. au premier lancement ou depuis les réglages).
+  /// À demander au lancement / depuis les réglages.
   Future<void> requestPermissions() async {
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
@@ -70,7 +69,7 @@ class NotificationService {
     return scheduled;
   }
 
-  /// Planifie un rappel quotidien par créneau du traitement.
+  /// Planifie un rappel quotidien récurrent par créneau du traitement.
   Future<void> scheduleForTreatment(Treatment t) async {
     if (t.id == null || !t.active) return;
     await cancelForTreatment(t.id!);
@@ -88,9 +87,16 @@ class NotificationService {
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents:
-            DateTimeComponents.time, // répétition quotidienne
+        matchDateTimeComponents: DateTimeComponents.time,
       );
+    }
+  }
+
+  /// Filet de sécurité : replanifie tous les rappels au démarrage de l'app
+  /// (après un redémarrage du téléphone, les rappels peuvent être perdus).
+  Future<void> rescheduleAll(List<Treatment> treatments) async {
+    for (final t in treatments) {
+      await scheduleForTreatment(t);
     }
   }
 

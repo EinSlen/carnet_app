@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../data/app_repository.dart';
 import '../data/models.dart';
+import '../data/providers.dart';
 
-class AnimalFormScreen extends StatefulWidget {
+class AnimalFormScreen extends ConsumerStatefulWidget {
   final Animal? animal; // null = création
   const AnimalFormScreen({super.key, this.animal});
 
   @override
-  State<AnimalFormScreen> createState() => _AnimalFormScreenState();
+  ConsumerState<AnimalFormScreen> createState() => _AnimalFormScreenState();
 }
 
-class _AnimalFormScreenState extends State<AnimalFormScreen> {
+class _AnimalFormScreenState extends ConsumerState<AnimalFormScreen> {
   final _form = GlobalKey<FormState>();
-  final _repo = AppRepository.instance;
 
   late final _name = TextEditingController(text: widget.animal?.name ?? '');
   late final _breed = TextEditingController(text: widget.animal?.breed ?? '');
@@ -27,10 +27,22 @@ class _AnimalFormScreenState extends State<AnimalFormScreen> {
   late final _allergies =
       TextEditingController(text: widget.animal?.allergies ?? '');
 
-  late String _species = widget.animal?.species ?? 'chat';
+  late Species _species = widget.animal?.species ?? Species.chat;
   late DateTime? _birth = widget.animal?.birthDate;
+  bool _saving = false;
 
   bool get _isEdit => widget.animal != null;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _breed.dispose();
+    _weight.dispose();
+    _microchip.dispose();
+    _chronic.dispose();
+    _allergies.dispose();
+    super.dispose();
+  }
 
   Future<void> _pickBirth() async {
     final d = await showDatePicker(
@@ -43,7 +55,8 @@ class _AnimalFormScreenState extends State<AnimalFormScreen> {
   }
 
   Future<void> _save() async {
-    if (!_form.currentState!.validate()) return;
+    if (!_form.currentState!.validate() || _saving) return;
+    setState(() => _saving = true);
     final a = Animal(
       id: widget.animal?.id,
       name: _name.text.trim(),
@@ -56,12 +69,21 @@ class _AnimalFormScreenState extends State<AnimalFormScreen> {
       allergies: _allergies.text.trim(),
       createdAt: widget.animal?.createdAt,
     );
-    if (_isEdit) {
-      await _repo.updateAnimal(a);
-    } else {
-      await _repo.insertAnimal(a);
+    try {
+      final repo = ref.read(repositoryProvider);
+      if (_isEdit) {
+        await repo.updateAnimal(a);
+      } else {
+        await repo.insertAnimal(a);
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Enregistrement impossible.')));
+      }
     }
-    if (mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -81,20 +103,15 @@ class _AnimalFormScreenState extends State<AnimalFormScreen> {
                   (v == null || v.trim().isEmpty) ? 'Indique un nom' : null,
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
+            DropdownButtonFormField<Species>(
               initialValue: _species,
               decoration: const InputDecoration(labelText: 'Espèce'),
-              items: const [
-                DropdownMenuItem(value: 'chat', child: Text('🐱 Chat')),
-                DropdownMenuItem(value: 'chien', child: Text('🐶 Chien')),
-                DropdownMenuItem(value: 'lapin', child: Text('🐰 Lapin')),
-                DropdownMenuItem(value: 'rongeur', child: Text('🐹 Rongeur')),
-                DropdownMenuItem(value: 'oiseau', child: Text('🐦 Oiseau')),
-                DropdownMenuItem(value: 'reptile', child: Text('🦎 Reptile')),
-                DropdownMenuItem(value: 'cheval', child: Text('🐴 Cheval')),
-                DropdownMenuItem(value: 'autre', child: Text('🐾 Autre')),
+              items: [
+                for (final s in Species.values)
+                  DropdownMenuItem(
+                      value: s, child: Text('${s.emoji} ${s.label}')),
               ],
-              onChanged: (v) => setState(() => _species = v ?? 'chat'),
+              onChanged: (v) => setState(() => _species = v ?? Species.chat),
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -137,7 +154,10 @@ class _AnimalFormScreenState extends State<AnimalFormScreen> {
               decoration: const InputDecoration(labelText: 'Allergies'),
             ),
             const SizedBox(height: 24),
-            FilledButton(onPressed: _save, child: const Text('Enregistrer')),
+            FilledButton(
+              onPressed: _saving ? null : _save,
+              child: Text(_saving ? 'Enregistrement...' : 'Enregistrer'),
+            ),
           ],
         ),
       ),

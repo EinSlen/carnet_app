@@ -12,6 +12,9 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
+  # Gestion d'état + injection de dépendances
+  flutter_riverpod: ^2.6.1
+
   # Base de données locale (100% hors-ligne, pas de codegen)
   sqflite: ^2.3.3
   path: ^1.9.0
